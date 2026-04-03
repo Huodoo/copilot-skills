@@ -1,6 +1,6 @@
 ---
 name: frontend-node-type-guard
-description: "纯前端项目（无 SSR/SSG）中的 Node 类型泄漏守卫。USE FOR: React/Vue/Vite 等浏览器项目出现 process/Buffer/node:* 可用、或依赖变更后疑似引入 @types/node 时，快速建立并验证类型守卫。DO NOT USE FOR: Next.js/Nuxt/Remix 等 SSR/SSG 项目，或本身包含 Node 运行时代码的场景。"
+description: "纯前端项目（无 SSR/SSG）中的 Node 类型泄漏守卫。USE FOR: React/Vue/Vite 等浏览器项目出现 process/Buffer/node:* 可用、或依赖变更后疑似引入 @types/node 时，快速建立并验证类型守卫；并修复 no-node.guard.ts 在 ESLint 下的 no-unused-expressions/no-unused-vars 问题。DO NOT USE FOR: Next.js/Nuxt/Remix 等 SSR/SSG 项目，或本身包含 Node 运行时代码的场景。"
 ---
 
 # Frontend Node Type Guard
@@ -28,36 +28,17 @@ description: "纯前端项目（无 SSR/SSG）中的 Node 类型泄漏守卫。U
 2. 写入如下内容：
 
 ```ts
-/**
- * 前端 Node 类型泄漏守卫。
- *
- * 该文件存在的原因：
- * - 浏览器侧 `src` 代码不应获得 Node 的全局类型或内建模块类型。
- * - 一旦 Node 类型泄漏到应用类型空间，前端代码可能误用仅 Node 可用的 API。
- *
- * 常见触发原因（高频）：
- * - `src` 中新增 import（常见于 devtools/helper 包）间接拉入引用 Node 类型的声明。
- * - 新增依赖自带 `.d.ts` 中包含 `/// <reference types="node" />`
- *   或 `node:fs` 这类导入，并被应用类型检查可见。
- *
- * 守卫原理：
- * - 下面这些语句在浏览器类型上下文中“应该报错”。
- * - 我们使用 `@ts-expect-error` 明确要求其报错。
- * - 如果某次变更导致 Node 类型可见，报错会消失，TypeScript 会抛出
- *   "Unused '@ts-expect-error' directive"，从而在 CI/提交阶段及时失败。
- */
-
-// 浏览器应用代码不应看到 Node 全局变量 `process`。
-// @ts-expect-error 预期报错：前端类型空间不应存在 `process`；若未报错，常见链路是 `src` 新增 import 或新增依赖声明引入了 Node 类型。
-process;
-
-// 浏览器应用代码不应看到 Node 全局变量 `Buffer`。
-// @ts-expect-error 预期报错：前端类型空间不应存在 `Buffer`；若未报错，常见链路是某个包的 `.d.ts` 间接引用了 `@types/node`。
-Buffer;
-
 // 浏览器应用类型空间不应解析 `node:*` 内建模块。
 // @ts-expect-error 预期报错：`node:*` 在浏览器应用中不可解析；若可解析，通常是依赖声明（如 `/// <reference types="node" />`）泄漏到 app 类型图。
 import type {} from "node:fs";
+
+// 浏览器应用代码不应看到 Node 全局变量 `process`。
+// @ts-expect-error 预期报错：前端类型空间不应存在 `process`；若未报错，常见链路是 `src` 新增 import 或新增依赖声明引入了 Node 类型。
+export type __NoNodeProcess = typeof process;
+
+// 浏览器应用代码不应看到 Node 全局变量 `Buffer`。
+// @ts-expect-error 预期报错：前端类型空间不应存在 `Buffer`；若未报错，常见链路是某个包的 `.d.ts` 间接引用了 `@types/node`。
+export type __NoNodeBuffer = typeof Buffer;
 
 export {};
 ```
@@ -67,6 +48,18 @@ export {};
 ```bash
 pnpm exec tsc -p tsconfig.app.json --noEmit
 ```
+
+4. 如果项目启用 ESLint，再运行：
+
+```bash
+pnpm -C apps/web exec eslint src/types/no-node.guard.ts
+```
+
+## ESLint 兼容说明
+
+- 不要写 `process;`、`Buffer;` 这类裸表达式：会触发 `@typescript-eslint/no-unused-expressions`
+- 不要写未导出的本地类型别名：可能触发 `@typescript-eslint/no-unused-vars`
+- 推荐使用“导出类型别名 + @ts-expect-error”模式，既保留守卫语义，也能通过常见 lint 规则
 
 ## 结果判定
 
